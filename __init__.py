@@ -1,6 +1,17 @@
 import bpy
 import rigify
 
+bl_info = {
+    "name": "ADH Rigging Tools",
+    "author": "Adhi Hargo",
+    "version": (1, 0, 0),
+    "blender": (2, 8, 0),
+    "location": "View3D > Tools > ADH Rigging Tools",
+    "description": "Several simple tools to aid rigging.",
+    "warning": "",
+    "wiki_url": "https://github.com/adhihargo/rigging_tools",
+    "tracker_url": "https://github.com/adhihargo/rigging_tools/issues",
+    "category": "Rigging"}
 
 class ADH_UseSameCustomShape(bpy.types.Operator):
     """Copies active pose bone's custom shape to each selected pose bone."""
