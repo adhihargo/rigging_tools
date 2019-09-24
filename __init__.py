@@ -77,6 +77,105 @@ class ADH_SelectCustomShape(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class ADH_AbstractMaskOperator:
+    MASK_NAME = 'Z_ADH_MASK'
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None \
+               and context.active_object.type == 'MESH'
+
+    orig_vg = None
+
+    def save_vg(self, context):
+        self.orig_vg = context.object.vertex_groups.active
+
+    def restore_vg(self, context):
+        if self.orig_vg:
+            context.object.vertex_groups.active_index = self.orig_vg.index
+
+    def setup_mask_modifier(self, context):
+        mesh = context.active_object
+        mm = mesh.modifiers.get(self.MASK_NAME)
+        if not mm or mm.type != 'MASK':
+            mm = mesh.modifiers.new(self.MASK_NAME, 'MASK')
+        mm.show_render = False
+        mm.show_expanded = False
+        mm.vertex_group = self.MASK_NAME
+
+
+class ADH_DeleteMask(bpy.types.Operator, ADH_AbstractMaskOperator):
+    """Delete mask and its vertex group."""
+    bl_idname = 'mesh.adh_delete_mask'
+    bl_label = 'Delete Mask'
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        mesh = context.active_object
+
+        mm = mesh.modifiers.get(self.MASK_NAME)
+        if mm and mm.type == 'MASK':
+            mesh.modifiers.remove(mm)
+
+        vg = mesh.vertex_groups.get(self.MASK_NAME)
+        if vg:
+            mesh.vertex_groups.remove(vg)
+
+        return {'FINISHED'}
+
+
+class ADH_MaskSelectedVertices(bpy.types.Operator, ADH_AbstractMaskOperator):
+    """Add selected vertices to mask"""
+    bl_idname = 'mesh.adh_mask_selected_vertices'
+    bl_label = 'Mask Selected Vertices'
+    bl_options = {'REGISTER'}
+
+    action = bpy.props.EnumProperty(
+        name='Action',
+        items=[('add', 'Add', 'Add selected vertices to mask.'),
+               ('remove', 'Remove', 'Remove selected vertices from mask.'),
+               ('invert', 'Invert', 'Invert mask')],
+        default='add',
+        options={'HIDDEN', 'SKIP_SAVE'})
+
+    def invoke(self, context, event):
+        mesh = context.active_object
+        self.save_vg(context)
+
+        if event.shift:
+            self.action = 'remove'
+        elif event.ctrl:
+            self.action = 'invert'
+
+        vg = mesh.vertex_groups.get(self.MASK_NAME)
+        if not vg:
+            vg = mesh.vertex_groups.new(name=self.MASK_NAME)
+        mesh.vertex_groups.active_index = vg.index
+
+        if self.action == 'invert':
+            bpy.ops.object.vertex_group_invert()
+
+        self.setup_mask_modifier(context)
+
+        mesh.data.update()
+        selected_verts = [vert.index for vert in mesh.data.vertices if vert.select is True]
+
+        if self.action == 'add':
+            if context.object.mode == 'EDIT':
+                bpy.ops.object.vertex_group_assign()
+            else:
+                vg.add(selected_verts, 1.0, 'REPLACE')
+        elif self.action == 'remove':
+            if context.object.mode == 'EDIT':
+                bpy.ops.object.vertex_group_remove_from()
+            else:
+                vg.remove(selected_verts)
+
+        self.restore_vg(context)
+
+        return {'FINISHED'}
+
+
 class ADH_RemoveVertexGroupsUnselectedBones(bpy.types.Operator):
     """Removes all vertex groups other than selected bones.
 
@@ -183,6 +282,8 @@ class ADH_SyncCustomShapePositionToBone(bpy.types.Operator):
 def register():
     bpy.utils.register_class(ADH_UseSameCustomShape)
     bpy.utils.register_class(ADH_SelectCustomShape)
+    bpy.utils.register_class(ADH_MaskSelectedVertices)
+    bpy.utils.register_class(ADH_DeleteMask)
     bpy.utils.register_class(ADH_RemoveVertexGroupsUnselectedBones)
     bpy.utils.register_class(ADH_BindToBone)
     bpy.utils.register_class(ADH_SyncCustomShapePositionToBone)
@@ -191,6 +292,8 @@ def register():
 def unregister():
     bpy.utils.unregister_class(ADH_UseSameCustomShape)
     bpy.utils.unregister_class(ADH_SelectCustomShape)
+    bpy.utils.unregister_class(ADH_MaskSelectedVertices)
+    bpy.utils.unregister_class(ADH_DeleteMask)
     bpy.utils.unregister_class(ADH_RemoveVertexGroupsUnselectedBones)
     bpy.utils.unregister_class(ADH_BindToBone)
     bpy.utils.unregister_class(ADH_SyncCustomShapePositionToBone)
