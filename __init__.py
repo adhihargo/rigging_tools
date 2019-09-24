@@ -1,5 +1,6 @@
 import bpy
 import rigify
+from mathutils import Vector
 
 bl_info = {
     "name": "ADH Rigging Tools",
@@ -12,6 +13,12 @@ bl_info = {
     "wiki_url": "https://github.com/adhihargo/rigging_tools",
     "tracker_url": "https://github.com/adhihargo/rigging_tools/issues",
     "category": "Rigging"}
+
+PRF_ROOT = "root-"
+PRF_TIP = "tip-"
+PRF_HOOK = "hook-"
+BBONE_BASE_SIZE = 0.01
+
 
 class ADH_UseSameCustomShape(bpy.types.Operator):
     """Copies active pose bone's custom shape to each selected pose bone."""
@@ -176,6 +183,215 @@ class ADH_MaskSelectedVertices(bpy.types.Operator, ADH_AbstractMaskOperator):
         return {'FINISHED'}
 
 
+class ADH_CreateSpokes(bpy.types.Operator):
+    """Creates parentless bones in selected armature from the 3D cursor, ending at each selected vertices of active mesh object."""
+    bl_idname = 'armature.adh_create_spokes'
+    bl_label = 'Create Spokes'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    parent = bpy.props.BoolProperty(
+        name="Parent",
+        description="Create parent bone, one for each if armature selected.",
+        default=False
+    )
+
+    tip = bpy.props.BoolProperty(
+        name="Tracked Tip",
+        description="Create tip bone and insert Damped Track constraint with the tip as target.",
+        default=False
+    )
+
+    spoke_layers = bpy.props.BoolVectorProperty(
+        name="Spoke Layers",
+        description="Armature layers where spoke bones will be placed",
+        subtype='LAYER',
+        size=32,
+        default=[x == 29 for x in range(0, 32)]
+    )
+
+    aux_layers = bpy.props.BoolVectorProperty(
+        name="Parent and Tip Layers",
+        description="Armature layers where spoke tip and parent bones" + \
+                    " will be placed",
+        subtype='LAYER',
+        size=32,
+        default=[x == 30 for x in range(0, 32)]
+    )
+
+    basename = bpy.props.StringProperty(
+        name="Bone Name",
+        default="spoke",
+    )
+
+    invoked = False
+
+    def setup_bone_parent(self, armature, bone, parent_bone):
+        # Create per-bone parent if no parent set
+        if not parent_bone and self.parent:
+            parent_bone = armature.data.edit_bones.new(PRF_ROOT + bone.name)
+            parent_bone.tail = bone.head + Vector([0, 0, -.05])
+            parent_bone.head = bone.head
+            parent_bone.bbone_x = bone.bbone_x * 2
+            parent_bone.bbone_z = bone.bbone_x * 2
+            parent_bone.layers = self.aux_layers
+            parent_bone.align_orientation(bone)
+            parent_bone.use_deform = False
+
+            delta = parent_bone.head - parent_bone.tail
+            parent_bone.head += delta
+            parent_bone.tail += delta
+
+        if parent_bone:
+            bone_parent = bone.parent
+            bone.parent = parent_bone
+            bone.use_connect = True
+
+            parent_bone.parent = bone_parent
+
+    def setup_bone_tip(self, armature, bone):
+        if not self.tip:
+            return
+        tip_bone = armature.data.edit_bones.new(PRF_TIP + bone.name)
+        tip_bone.head = bone.tail
+        tip_bone.tail = bone.tail + Vector([.05, 0, 0])
+        tip_bone.bbone_x = bone.bbone_x * 2
+        tip_bone.bbone_z = bone.bbone_z * 2
+        tip_bone.align_orientation(bone)
+        tip_bone.layers = self.aux_layers
+        tip_bone.use_deform = False
+
+    def setup_bone_constraint(self, armature, bone_name):
+        if not self.tip:
+            return
+        pbone = armature.pose.bones[bone_name]
+        tip_name = PRF_TIP + bone_name
+        dt_constraint = pbone.constraints.new('DAMPED_TRACK')
+        dt_constraint.target = armature
+        dt_constraint.subtarget = tip_name
+
+    def setup_bone(self, armature, bone_name, head_co, tail_co, parent):
+        bone = armature.data.edit_bones.new(bone_name)
+        bone.head = head_co
+        bone.tail = tail_co
+        bone.bbone_x = BBONE_BASE_SIZE
+        bone.bbone_z = BBONE_BASE_SIZE
+        bone.use_deform = True
+        bone.select = True
+        bone.layers = self.spoke_layers
+        self.setup_bone_parent(armature, bone, parent)
+        self.setup_bone_tip(armature, bone)
+
+    def set_armature_layers(self, armature):
+        combined_layers = list(
+            map(any,
+                zip(armature.data.layers, self.spoke_layers, self.aux_layers)
+                if (self.parent or self.tip) else
+                zip(armature.data.layers, self.spoke_layers)))
+        armature.data.layers = combined_layers
+
+    def get_vertex_coordinates(self, mesh, armature):
+        # Get vertex coordinates localized to armature's matrix
+        mesh.update_from_editmode()
+        armature_mat_inv = armature.matrix_world.inverted()
+        mesh_mat = mesh.matrix_world
+        return [armature_mat_inv * (mesh_mat * vert.co)
+                for vert in mesh.data.vertices if vert.select]
+
+    def create_spokes(self, context, mesh, armature):
+        scene = context.scene
+
+        vert_coordinates = self.get_vertex_coordinates(mesh, armature)
+        cursor_co = armature.matrix_world.inverted() * scene.cursor_location
+
+        bpy.ops.object.editmode_toggle()
+        scene.objects.active = armature
+        prev_mode = armature.mode
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        for bone in context.selected_editable_bones:
+            bone.select = False
+
+        parent = None
+        if self.parent:
+            parent = armature.data.edit_bones.new(PRF_ROOT + self.basename)
+            parent.head = cursor_co + Vector([0, 0, -1])
+            parent.tail = cursor_co
+        for index, vert_co in enumerate(vert_coordinates):
+            bone_name = "%s.%d" % (self.basename, index)
+            self.setup_bone(armature, bone_name, cursor_co, vert_co, parent)
+
+        bpy.ops.object.mode_set(mode='POSE')
+        for index in range(len(vert_coordinates)):
+            bone_name = "%s.%d" % (self.basename, index)
+            self.setup_bone_constraint(armature, bone_name)
+        bpy.ops.object.mode_set(mode=prev_mode)
+
+        self.set_armature_layers(armature)
+
+        return {'FINISHED'}
+
+    def create_spoke_tips(self, context, armature):
+        prev_mode = armature.mode
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        for bone in context.selected_bones:
+            self.setup_bone_parent(armature, bone, None)
+            self.setup_bone_tip(armature, bone)
+
+        bpy.ops.object.mode_set(mode='POSE')
+        for bone in context.selected_pose_bones:
+            self.setup_bone_constraint(armature, bone.name)
+        bpy.ops.object.mode_set(mode=prev_mode)
+
+        self.set_armature_layers(armature)
+
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context):
+        active = context.active_object
+        return active is not None and active.mode in ['EDIT', 'POSE'] and \
+               active.type in ['MESH', 'ARMATURE'] and \
+               len(context.selected_objects) <= 2
+
+    def draw(self, context):
+        layout = self.layout
+
+        if self.invoked:
+            return
+
+        row = layout.row(align=True)
+        row.prop(self, "basename")
+
+        row = layout.row(align=True)
+        row.prop(self, "parent", toggle=True)
+        row.prop(self, "tip", toggle=True)
+
+        column = layout.column()
+        column.prop(self, "spoke_layers")
+
+        column = layout.column()
+        column.prop(self, "aux_layers")
+
+    def execute(self, context):
+        obj1 = context.active_object
+        selected = [obj for obj in context.selected_objects if obj != obj1]
+        obj2 = selected[0] if selected else None
+
+        if obj1.type == 'MESH' and obj1.mode == 'EDIT' \
+                and obj2 and obj2.type == 'ARMATURE':
+            return self.create_spokes(context, obj1, obj2)
+        elif obj1.type == 'ARMATURE':
+            return self.create_spoke_tips(context, obj1)
+
+        return {'CANCELLED'}
+
+    # def invoke(self, context, event):
+    #     retval = context.window_manager.invoke_props_dialog(self)
+    #     self.invoked = True
+    #     return retval
+
+
 class ADH_RemoveVertexGroupsUnselectedBones(bpy.types.Operator):
     """Removes all vertex groups other than selected bones.
 
@@ -284,6 +500,7 @@ def register():
     bpy.utils.register_class(ADH_SelectCustomShape)
     bpy.utils.register_class(ADH_MaskSelectedVertices)
     bpy.utils.register_class(ADH_DeleteMask)
+    bpy.utils.register_class(ADH_CreateSpokes)
     bpy.utils.register_class(ADH_RemoveVertexGroupsUnselectedBones)
     bpy.utils.register_class(ADH_BindToBone)
     bpy.utils.register_class(ADH_SyncCustomShapePositionToBone)
@@ -294,6 +511,7 @@ def unregister():
     bpy.utils.unregister_class(ADH_SelectCustomShape)
     bpy.utils.unregister_class(ADH_MaskSelectedVertices)
     bpy.utils.unregister_class(ADH_DeleteMask)
+    bpy.utils.unregister_class(ADH_CreateSpokes)
     bpy.utils.unregister_class(ADH_RemoveVertexGroupsUnselectedBones)
     bpy.utils.unregister_class(ADH_BindToBone)
     bpy.utils.unregister_class(ADH_SyncCustomShapePositionToBone)
