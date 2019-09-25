@@ -1,3 +1,5 @@
+import re
+
 import bpy
 import rigify
 from mathutils import Vector
@@ -18,6 +20,50 @@ PRF_ROOT = "root-"
 PRF_TIP = "tip-"
 PRF_HOOK = "hook-"
 BBONE_BASE_SIZE = 0.01
+
+
+class ADH_RenameRegex(bpy.types.Operator):
+    """Renames selected objects or bones using regular expressions. Depends on re, standard library module."""
+    bl_idname = 'object.adh_rename_regex'
+    bl_label = 'Rename Regex'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    regex_search_pattern = bpy.props.StringProperty(
+        name="Search String",
+        default="",
+    )
+    regex_replacement_string = bpy.props.StringProperty(
+        name="Replacement String",
+        default="",
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return context.selected_objects != []
+
+    def execute(self, context):
+        search_str = self.regex_search_pattern
+        replacement_str = self.regex_replacement_string
+        substring_re = re.compile(search_str)
+        if context.mode == 'OBJECT':
+            item_list = context.selected_objects
+        elif context.mode == 'POSE':
+            item_list = context.selected_pose_bones
+        elif context.mode == 'EDIT_ARMATURE':
+            item_list = context.selected_bones
+        else:
+            return {'CANCELLED'}
+
+        for item in item_list:
+            item.name = substring_re.sub(replacement_str, item.name)
+
+        # In pose mode, operator's result won't show immediately. This
+        # solves it somehow: only the View3D area will refresh
+        # promptly.
+        if context.mode == 'POSE':
+            context.area.tag_redraw()
+
+        return {'FINISHED'}
 
 
 class ADH_UseSameCustomShape(bpy.types.Operator):
@@ -699,6 +745,7 @@ class ADH_SyncCustomShapePositionToBone(bpy.types.Operator):
 
 
 def register():
+    bpy.utils.register_class(ADH_RenameRegex)
     bpy.utils.register_class(ADH_UseSameCustomShape)
     bpy.utils.register_class(ADH_SelectCustomShape)
     bpy.utils.register_class(ADH_BindToLattice)
@@ -713,6 +760,7 @@ def register():
 
 
 def unregister():
+    bpy.utils.unregister_class(ADH_RenameRegex)
     bpy.utils.unregister_class(ADH_UseSameCustomShape)
     bpy.utils.unregister_class(ADH_SelectCustomShape)
     bpy.utils.unregister_class(ADH_BindToLattice)
