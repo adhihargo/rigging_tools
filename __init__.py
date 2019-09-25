@@ -84,6 +84,72 @@ class ADH_SelectCustomShape(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class ADH_BindToLattice(bpy.types.Operator):
+    """Bind selected objects to active lattice."""
+    bl_idname = 'lattice.adh_bind_to_objects'
+    bl_label = 'Bind Lattice to Objects'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    create_vertex_group = bpy.props.BoolProperty(
+        name="Create Vertex Group",
+        description="Create limiting vertex group using the lattice object's name.",
+        default=False
+    )
+
+    @classmethod
+    def poll(self, context):
+        obj = context.active_object
+        return obj and obj.type == 'LATTICE' and context.selected_objects
+
+    def execute(self, context):
+        lattice = context.active_object
+        objects = [o for o in context.selected_objects if o.type == 'MESH']
+
+        for obj in objects:
+            lm_possibles = [m for m in obj.modifiers if
+                            m.type == 'LATTICE' and m.object == lattice]
+            if lm_possibles:
+                lm = lm_possibles[0]
+                lm.name = lattice.name
+            else:
+                lm = obj.modifiers.new(lattice.name, 'LATTICE')
+                lm.object = lattice
+
+            lm.show_expanded = False
+            if self.create_vertex_group:
+                vg = obj.vertex_groups.get(lattice.name, None)
+                if not vg:
+                    vg = obj.vertex_groups.new(name=lattice.name)
+                lm.vertex_group = vg.name
+
+        return {'FINISHED'}
+
+
+class ADH_ApplyLattices(bpy.types.Operator):
+    """Applies all lattice modifiers, deletes all shapekeys. Used for lattice-initialized shapekey creation."""
+    bl_idname = 'mesh.adh_apply_lattices'
+    bl_label = 'Apply Lattices'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'OBJECT' \
+               and context.selected_objects != [] \
+               and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        obj = context.active_object
+        if obj.data.shape_keys:
+            for i in range(len(obj.data.shape_keys.key_blocks), 0, -1):
+                obj.active_shape_key_index = i - 1
+                bpy.ops.object.shape_key_remove()
+        for m in obj.modifiers:
+            if m.type == 'LATTICE':
+                bpy.ops.object.modifier_apply(modifier=m.name)
+
+        return {'FINISHED'}
+
+
 class ADH_AbstractMaskOperator:
     MASK_NAME = 'Z_ADH_MASK'
 
@@ -181,6 +247,143 @@ class ADH_MaskSelectedVertices(bpy.types.Operator, ADH_AbstractMaskOperator):
         self.restore_vg(context)
 
         return {'FINISHED'}
+
+
+class ADH_CreateHooks(bpy.types.Operator):
+    """Creates parentless bone for each selected bones (local copy-transformed) or lattice points."""
+    bl_idname = 'armature.adh_create_hooks'
+    bl_label = 'Create Hooks'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    hook_layers = bpy.props.BoolVectorProperty(
+        name="Hook Layers",
+        description="Armature layers where new hooks will be placed",
+        subtype='LAYER',
+        size=32,
+        default=[x == 30 for x in range(0, 32)]
+    )
+
+    invoked = False
+
+    def setup_copy_constraint(self, armature, bone_name):
+        bone = armature.pose.bones[bone_name]
+        ct_constraint = bone.constraints.new('COPY_TRANSFORMS')
+        ct_constraint.owner_space = 'LOCAL'
+        ct_constraint.target_space = 'LOCAL'
+        ct_constraint.target = armature
+        ct_constraint.subtarget = PRF_HOOK + bone_name
+
+    def hook_on_lattice(self, context, lattice, armature):
+        objects = context.view_layer.objects
+
+        prev_lattice_mode = lattice.mode
+        bpy.ops.object.mode_set(mode='OBJECT')  # Needed for matrix calculation
+
+        armature_mat_inv = armature.matrix_world.inverted()
+        lattice_mat = lattice.matrix_world
+
+        def global_lat_point_co(p):
+            local_point_co = (lattice_mat @ p)
+            return armature_mat_inv @ local_point_co
+
+        def get_selected_points(lat):
+            return [point for point in lat.data.points if point.select]
+
+        lattice_pos = get_selected_points(lattice)
+        bone_pos = [global_lat_point_co(point.co) for point in lattice_pos]
+        bone_names = [
+            "%(prefix)s%(lat)s.%(index)d%(suffix)s" %
+            dict(prefix=PRF_HOOK, lat=lattice.name, index=index,
+                 suffix=".R" if global_lat_point_co(point).x < 0 \
+                     else ".L" if point.x > 0 else "")
+            for index, point in enumerate(bone_pos)]
+
+        objects.active = armature
+        prev_mode = armature.mode
+        bpy.ops.object.mode_set(mode='EDIT')
+        for index, point_co in enumerate(bone_pos):
+            bone_name = bone_names[index]
+            bone = armature.data.edit_bones.new(bone_name)
+            bone.head = point_co
+            bone.tail = point_co + Vector([0, 0, BBONE_BASE_SIZE * 5])
+            bone.bbone_x = BBONE_BASE_SIZE
+            bone.bbone_z = BBONE_BASE_SIZE
+            bone.layers = self.hook_layers
+            bone.use_deform = False
+        armature.data.layers = list(
+            map(any, zip(armature.data.layers, self.hook_layers)))
+        bpy.ops.object.mode_set(mode=prev_mode)
+
+        objects.active = lattice
+        bpy.ops.object.mode_set(mode='EDIT')
+        selected_points = get_selected_points(lattice)  # previous one lost after toggling
+        for point in selected_points:
+            point.select = False
+        for index, point in enumerate(selected_points):
+            bone_name = bone_names[index]
+            mod = lattice.modifiers.new(bone_name, 'HOOK')
+            mod.object = armature
+            mod.subtarget = bone_name
+            point.select = True
+            bpy.ops.object.hook_assign(modifier=bone_name)
+            bpy.ops.object.hook_reset(modifier=bone_name)
+            point.select = False
+        for point in selected_points:
+            point.select = True
+        bpy.ops.object.mode_set(mode=prev_lattice_mode)
+
+        return {'FINISHED'}
+
+    def hook_on_bone(self, context, armature):
+        prev_mode = armature.mode
+        bpy.ops.object.mode_set(mode='EDIT')
+        for bone in context.selected_bones:
+            hook_name = PRF_HOOK + bone.name
+            hook = armature.data.edit_bones.new(hook_name)
+            hook.head = bone.head
+            hook.tail = bone.tail
+            hook.bbone_x = bone.bbone_x * 2
+            hook.bbone_z = bone.bbone_z * 2
+            hook.layers = self.hook_layers
+            hook.use_deform = False
+            hook.roll = bone.roll
+            hook.parent = bone.parent
+        bpy.ops.object.mode_set(mode='POSE')
+        for bone in context.selected_pose_bones:
+            self.setup_copy_constraint(armature, bone.name)
+        bpy.ops.object.mode_set(mode=prev_mode)
+
+        return {'FINISHED'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and \
+               context.active_object.type in ['ARMATURE', 'LATTICE']
+
+    def draw(self, context):
+        layout = self.layout
+
+        if self.invoked:
+            return
+
+        row = layout.row(align=True)
+        row.prop(self, "hook_layers")
+
+    def execute(self, context):
+        obj1 = context.active_object
+        if obj1.type == 'LATTICE':
+            selected = [obj for obj in context.selected_objects if obj != obj1]
+            if not selected:
+                return {'CANCELLED'}
+            obj2 = selected[0]
+            return self.hook_on_lattice(context, obj1, obj2)
+        else:
+            return self.hook_on_bone(context, obj1)
+
+    # def invoke(self, context, event):
+    #     retval = context.window_manager.invoke_props_dialog(self)
+    #     self.invoked = True
+    #     return retval
 
 
 class ADH_CreateSpokes(bpy.types.Operator):
@@ -498,8 +701,11 @@ class ADH_SyncCustomShapePositionToBone(bpy.types.Operator):
 def register():
     bpy.utils.register_class(ADH_UseSameCustomShape)
     bpy.utils.register_class(ADH_SelectCustomShape)
+    bpy.utils.register_class(ADH_BindToLattice)
+    bpy.utils.register_class(ADH_ApplyLattices)
     bpy.utils.register_class(ADH_MaskSelectedVertices)
     bpy.utils.register_class(ADH_DeleteMask)
+    bpy.utils.register_class(ADH_CreateHooks)
     bpy.utils.register_class(ADH_CreateSpokes)
     bpy.utils.register_class(ADH_RemoveVertexGroupsUnselectedBones)
     bpy.utils.register_class(ADH_BindToBone)
@@ -509,8 +715,11 @@ def register():
 def unregister():
     bpy.utils.unregister_class(ADH_UseSameCustomShape)
     bpy.utils.unregister_class(ADH_SelectCustomShape)
+    bpy.utils.unregister_class(ADH_BindToLattice)
+    bpy.utils.unregister_class(ADH_ApplyLattices)
     bpy.utils.unregister_class(ADH_MaskSelectedVertices)
     bpy.utils.unregister_class(ADH_DeleteMask)
+    bpy.utils.unregister_class(ADH_CreateHooks)
     bpy.utils.unregister_class(ADH_CreateSpokes)
     bpy.utils.unregister_class(ADH_RemoveVertexGroupsUnselectedBones)
     bpy.utils.unregister_class(ADH_BindToBone)
