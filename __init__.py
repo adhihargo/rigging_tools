@@ -1,8 +1,11 @@
+import math
 import re
 
 import bpy
 import rigify
-from mathutils import Vector
+from mathutils import Vector, Matrix
+
+from rigify.utils.widgets import create_widget
 
 bl_info = {
     "name": "ADH Rigging Tools",
@@ -128,6 +131,409 @@ class ADH_SelectCustomShape(bpy.types.Operator):
             return {'CANCELLED'}
 
         return {'FINISHED'}
+
+
+class ADH_CreateCustomShape(bpy.types.Operator):
+    """Creates mesh for custom shape for selected bones, at active bone's position, using its name as suffix."""
+    bl_idname = 'armature.adh_create_shape'
+    bl_label = 'Create Custom Shape'
+    bl_options = {'REGISTER', 'UNDO'}
+
+    widget_shape: bpy.props.EnumProperty(
+        name='Shape',
+        items=[('sphere', 'Sphere', '8x4 edges'),
+               ('ring', 'Ring', '24 vertices'),
+               ('square', 'Square', ''),
+               ('triangle', 'Triangle', ''),
+               ('bidirection', 'Bidirection', ''),
+               ('box', 'Box', ''),
+               ('fourways', 'Four-Ways', 'Circle with arrows to four directions - 40 vertices'),
+               ('fourgaps', 'Four-Gaps', 'Broken circle that complements Four-Ways - 20 vertices'),
+               ('selected', 'Selected', 'Shape of selected object')])
+
+    widget_size: bpy.props.FloatProperty(
+        name='Size',
+        default=1.0,
+        min=0,
+        max=2,
+        step=10,
+        description="Widget's scale as relative to bone.")
+
+    widget_pos: bpy.props.FloatProperty(
+        name='Position',
+        default=0.5,
+        min=-.5,
+        max=1.5,
+        step=5,
+        precision=1,
+        description="Widget's position along bone's length. 0.0 = base, 1.0 = tip.")
+
+    widget_rot: bpy.props.FloatProperty(
+        name='Rotation',
+        default=0,
+        min=-90,
+        max=90,
+        step=10,
+        precision=1,
+        description="Widget's rotation along bone's X axis.")
+
+    widget_prefix: bpy.props.StringProperty(
+        name='Prefix',
+        description="Prefix for the new widget's name",
+        default='WGT-')
+
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'POSE' \
+               and context.active_pose_bone is not None
+
+    def draw(self, context):
+        layout = self.layout
+
+        col = layout.column()
+        col.prop(self, 'widget_shape', expand=False, text='')
+
+        col = layout.column(align=1)
+        col.prop(self, 'widget_size', slider=True)
+        col.prop(self, 'widget_pos', slider=True)
+        col.prop(self, 'widget_rot', slider=True)
+
+        col = layout.column(align=1)
+        col.label(text='Prefix:')
+        col.prop(self, 'widget_prefix', text='')
+
+    def create_widget_from_object(self, rig, bone, widget_src):
+        obj_name = self.widget_prefix + bone.name
+        scene = bpy.context.scene
+
+        widget_data = bpy.data.meshes.new_from_object(widget_src)
+        matrix_src = widget_src.matrix_world
+        matrix_bone = rig.matrix_world * bone.matrix
+        matrix_wgt = matrix_bone.inverted() * matrix_src
+        widget_data.transform(matrix_wgt)
+
+        if obj_name in scene.objects:
+            obj = scene.objects[obj_name]
+            obj.data = widget_data
+        else:
+            obj = bpy.data.objects.new(obj_name, widget_data)
+            obj.draw_type = 'WIRE'
+            scene.objects.link(obj)
+
+        bone.custom_shape = obj
+        rigify.utils.obj_to_bone(obj, rig, bone.name)
+
+        return obj
+
+    # --------------- Long, boring widget creation functions ---------------
+
+    @staticmethod
+    def create_sphere_widget(rig, bone_name, size=1.0, pos=1.0, rot=0.0, bone_transform_name=None):
+        obj = create_widget(rig, bone_name, bone_transform_name)
+        if obj != None:
+            verts = [(-0.3535533845424652 * size, -0.3535533845424652 * size, 2.9802322387695312e-08 * size),
+                     (-0.5 * size, 2.1855694143368964e-08 * size, -1.7763568394002505e-15 * size),
+                     (-0.3535533845424652 * size, 0.3535533845424652 * size, -2.9802322387695312e-08 * size),
+                     (4.371138828673793e-08 * size, 0.5 * size, -2.9802322387695312e-08 * size),
+                     (-0.24999994039535522 * size, -0.3535533845424652 * size, 0.2500000596046448 * size),
+                     (-0.3535533845424652 * size, 5.960464477539063e-08 * size, 0.35355344414711 * size),
+                     (-0.24999994039535522 * size, 0.3535534143447876 * size, 0.2500000298023224 * size),
+                     (7.968597515173315e-08 * size, -0.3535534143447876 * size, 0.35355344414711 * size),
+                     (8.585823962903305e-08 * size, 5.960464477539063e-08 * size, 0.5000001192092896 * size),
+                     (7.968597515173315e-08 * size, 0.3535534143447876 * size, 0.3535533845424652 * size),
+                     (0.25000008940696716 * size, -0.3535533547401428 * size, 0.25 * size),
+                     (0.35355350375175476 * size, 5.960464477539063e-08 * size, 0.3535533845424652 * size),
+                     (0.25000008940696716 * size, 0.3535534143447876 * size, 0.2499999701976776 * size),
+                     (0.3535534739494324 * size, -0.3535534143447876 * size, -2.9802322387695312e-08 * size),
+                     (0.5000001192092896 * size, 2.9802315282267955e-08 * size, -8.429370268459024e-08 * size),
+                     (0.3535534739494324 * size, 0.3535533845424652 * size, -8.940696716308594e-08 * size),
+                     (0.2500000298023224 * size, -0.35355344414711 * size, -0.2500000596046448 * size),
+                     (0.3535533845424652 * size, 0.0 * size, -0.35355350375175476 * size),
+                     (0.2500000298023224 * size, 0.35355332493782043 * size, -0.25000011920928955 * size),
+                     (-4.494675920341251e-08 * size, -0.35355344414711 * size, -0.3535534143447876 * size),
+                     (-8.27291728455748e-08 * size, 0.0 * size, -0.5 * size),
+                     (-4.494675920341251e-08 * size, 0.3535533845424652 * size, -0.3535534739494324 * size),
+                     (1.2802747306750462e-08 * size, -0.5 * size, 0.0 * size),
+                     (-0.25000008940696716 * size, -0.35355344414711 * size, -0.24999994039535522 * size),
+                     (-0.35355350375175476 * size, 0.0 * size, -0.35355332493782043 * size),
+                     (-0.25000008940696716 * size, 0.35355332493782043 * size, -0.25 * size), ]
+            edges = [(0, 1), (1, 2), (2, 3), (4, 5), (5, 6), (2, 6), (0, 4), (5, 1), (7, 8), (8, 9), (6, 9), (5, 8),
+                     (7, 4), (10, 11), (11, 12), (9, 12), (10, 7), (11, 8), (13, 14), (14, 15), (12, 15), (13, 10),
+                     (14, 11), (16, 17), (17, 18), (15, 18), (16, 13), (17, 14), (19, 20), (20, 21), (18, 21), (16, 19),
+                     (20, 17), (22, 23), (23, 24), (24, 25), (21, 25), (20, 24), (23, 19), (22, 0), (22, 4), (6, 3),
+                     (22, 7), (9, 3), (22, 10), (12, 3), (22, 13), (15, 3), (22, 16), (18, 3), (22, 19), (21, 3),
+                     (25, 3), (25, 2), (0, 23), (1, 24), ]
+            faces = []
+            rot_mat = Matrix.Rotation(math.radians(rot), 4, 'X')
+            trans_mat = Matrix.Translation(Vector((0.0, pos, 0.0)))
+            mat = trans_mat @ rot_mat
+
+            mesh = obj.data
+            mesh.from_pydata(verts, edges, faces)
+            mesh.transform(mat)
+            mesh.update()
+            mesh.update()
+            return obj
+        else:
+            return None
+
+    @staticmethod
+    def create_ring_widget(rig, bone_name, size=1.0, pos=1.0, rot=0.0, bone_transform_name=None):
+        obj = create_widget(rig, bone_name, bone_transform_name)
+        if obj != None:
+
+            verts = [(0.0 * size, 2.9802322387695312e-08 * size, 0.5 * size),
+                     (-0.129409521818161 * size, 2.9802322387695312e-08 * size, 0.4829629063606262 * size),
+                     (-0.25 * size, 2.9802322387695312e-08 * size, 0.4330126941204071 * size),
+                     (-0.3535533845424652 * size, 2.9802322387695312e-08 * size, 0.3535533845424652 * size),
+                     (-0.4330127239227295 * size, 1.4901161193847656e-08 * size, 0.2499999850988388 * size),
+                     (-0.4829629063606262 * size, 1.4901161193847656e-08 * size, 0.1294095367193222 * size),
+                     (-0.5 * size, 3.552713678800501e-15 * size, 3.774895063202166e-08 * size),
+                     (-0.4829629361629486 * size, -1.4901161193847656e-08 * size, -0.12940946221351624 * size),
+                     (-0.4330127537250519 * size, -1.4901161193847656e-08 * size, -0.24999992549419403 * size),
+                     (-0.3535534739494324 * size, -2.9802322387695312e-08 * size, -0.35355329513549805 * size),
+                     (-0.25000011920928955 * size, -2.9802322387695312e-08 * size, -0.43301263451576233 * size),
+                     (-0.12940968573093414 * size, -2.9802322387695312e-08 * size, -0.48296287655830383 * size),
+                     (-1.9470718370939721e-07 * size, -2.9802322387695312e-08 * size, -0.5 * size),
+                     (0.1294093132019043 * size, -2.9802322387695312e-08 * size, -0.482962965965271 * size),
+                     (0.2499997913837433 * size, -2.9802322387695312e-08 * size, -0.43301281332969666 * size),
+                     (0.3535532057285309 * size, -2.9802322387695312e-08 * size, -0.3535535931587219 * size),
+                     (0.43301260471343994 * size, -2.9802322387695312e-08 * size, -0.25000014901161194 * size),
+                     (0.48296284675598145 * size, -1.4901161193847656e-08 * size, -0.12940971553325653 * size),
+                     (0.5 * size, -1.4210854715202004e-14 * size, -2.324561449995599e-07 * size),
+                     (0.482962965965271 * size, 1.4901161193847656e-08 * size, 0.12940926849842072 * size),
+                     (0.43301284313201904 * size, 1.4901161193847656e-08 * size, 0.2499997466802597 * size),
+                     (0.3535536229610443 * size, 2.9802322387695312e-08 * size, 0.3535531759262085 * size),
+                     (0.2500002980232239 * size, 2.9802322387695312e-08 * size, 0.43301254510879517 * size),
+                     (0.12940987944602966 * size, 2.9802322387695312e-08 * size, 0.48296281695365906 * size), ]
+            edges = [(1, 0), (2, 1), (3, 2), (4, 3), (5, 4), (6, 5), (7, 6), (8, 7), (9, 8), (10, 9), (11, 10),
+                     (12, 11), (13, 12), (14, 13), (15, 14), (16, 15), (17, 16), (18, 17), (19, 18), (20, 19), (21, 20),
+                     (22, 21), (23, 22), (0, 23), ]
+            faces = []
+            rot_mat = Matrix.Rotation(math.radians(rot), 4, 'X')
+            trans_mat = Matrix.Translation(Vector((0.0, pos, 0.0)))
+            mat = trans_mat @ rot_mat
+
+            mesh = obj.data
+            mesh.from_pydata(verts, edges, faces)
+            mesh.transform(mat)
+            mesh.update()
+            mesh.update()
+            return obj
+        else:
+            return None
+
+    @staticmethod
+    def create_square_widget(rig, bone_name, size=1.0, pos=1.0, rot=0.0, bone_transform_name=None):
+        obj = create_widget(rig, bone_name, bone_transform_name)
+        if obj != None:
+            verts = [(0.5 * size, -0.5 * size, 0.0 * size), (-0.5 * size, -0.5 * size, 0.0 * size),
+                     (0.5 * size, 0.5 * size, 0.0 * size), (-0.5 * size, 0.5 * size, 0.0 * size), ]
+            edges = [(0, 1), (2, 3), (0, 2), (3, 1), ]
+            faces = []
+            rot_mat = Matrix.Rotation(math.radians(rot), 4, 'X')
+            trans_mat = Matrix.Translation(Vector((0.0, pos, 0.0)))
+            mat = trans_mat @ rot_mat
+
+            mesh = obj.data
+            mesh.from_pydata(verts, edges, faces)
+            mesh.transform(mat)
+            mesh.update()
+            mesh.update()
+            return obj
+        else:
+            return None
+
+    @staticmethod
+    def create_triangle_widget(rig, bone_name, size=1.0, pos=1.0, rot=0.0, bone_transform_name=None):
+        obj = create_widget(rig, bone_name, bone_transform_name)
+        if obj is not None:
+            verts = [(0.0 * size, 0.0 * size, 0.0), (0.6 * size, 1.0 * size, 0.0), (-0.6 * size, 1.0 * size, 0.0), ]
+            edges = [(1, 2), (0, 1), (2, 0), ]
+            faces = []
+            rot_mat = Matrix.Rotation(math.radians(rot), 4, 'X')
+            trans_mat = Matrix.Translation(Vector((0.0, pos, 0.0)))
+            mat = trans_mat @ rot_mat
+
+            mesh = obj.data
+            mesh.from_pydata(verts, edges, faces)
+            mesh.transform(mat)
+            mesh.update()
+            mesh.update()
+            return obj
+        else:
+            return None
+
+    @staticmethod
+    def create_bidirection_widget(rig, bone_name, size=1.0, pos=1.0, rot=0.0, bone_transform_name=None):
+        obj = create_widget(rig, bone_name, bone_transform_name)
+        if obj != None:
+            verts = [(0.0 * size, -0.5 * size, 0.0 * size), (0.0 * size, 0.5 * size, 0.0 * size),
+                     (0.15000000596046448 * size, -0.3499999940395355 * size, 0.0 * size),
+                     (-0.15000000596046448 * size, 0.3499999940395355 * size, 0.0 * size),
+                     (0.15000000596046448 * size, 0.3499999940395355 * size, 0.0 * size),
+                     (-0.15000000596046448 * size, -0.3499999940395355 * size, 0.0 * size), ]
+            edges = [(2, 0), (4, 1), (5, 0), (3, 1), (0, 1), ]
+            faces = []
+            rot_mat = Matrix.Rotation(math.radians(rot), 4, 'X')
+            trans_mat = Matrix.Translation(Vector((0.0, pos, 0.0)))
+            mat = trans_mat @ rot_mat
+
+            mesh = obj.data
+            mesh.from_pydata(verts, edges, faces)
+            mesh.transform(mat)
+            mesh.update()
+            mesh.update()
+            return obj
+        else:
+            return None
+
+    @staticmethod
+    def create_box_widget(rig, bone_name, size=1.0, pos=1.0, rot=0.0, bone_transform_name=None):
+        obj = create_widget(rig, bone_name, bone_transform_name)
+        if obj != None:
+            verts = [(-0.5 * size, -0.5, -0.5 * size), (-0.5 * size, 0.5, -0.5 * size), (0.5 * size, 0.5, -0.5 * size),
+                     (0.5 * size, -0.5, -0.5 * size), (-0.5 * size, -0.5, 0.5 * size), (-0.5 * size, 0.5, 0.5 * size),
+                     (0.5 * size, 0.5, 0.5 * size), (0.5 * size, -0.5, 0.5 * size), ]
+            edges = [(4, 5), (5, 1), (1, 0), (0, 4), (5, 6), (6, 2), (2, 1), (6, 7), (7, 3), (3, 2), (7, 4), (0, 3), ]
+            faces = []
+            rot_mat = Matrix.Rotation(math.radians(rot), 4, 'X')
+            trans_mat = Matrix.Translation(Vector((0.0, pos, 0.0)))
+            mat = trans_mat @ rot_mat
+
+            mesh = obj.data
+            mesh.from_pydata(verts, edges, faces)
+            mesh.transform(mat)
+            mesh.update()
+            mesh.update()
+            return obj
+        else:
+            return None
+
+    @staticmethod
+    def create_fourways_widget(rig, bone_name, size=1.0, pos=1.0, rot=0.0, bone_transform_name=None):
+        obj = create_widget(rig, bone_name, bone_transform_name)
+        if obj != None:
+            verts = [(0.5829628705978394 * size, -1.4901161193847656e-08, 0.12940971553325653 * size),
+                     (-0.129409521818161 * size, 2.9802322387695312e-08, -0.4829629063606262 * size),
+                     (-0.25 * size, 2.9802322387695312e-08, -0.4330126941204071 * size),
+                     (-0.3535533845424652 * size, 2.9802322387695312e-08, -0.3535533845424652 * size),
+                     (-0.4330127239227295 * size, 1.4901161193847656e-08, -0.2499999850988388 * size),
+                     (-0.4829629063606262 * size, 1.4901161193847656e-08, -0.1294095367193222 * size),
+                     (0.5829629898071289 * size, 1.4901161193847656e-08, -0.12940926849842072 * size),
+                     (-0.4829629361629486 * size, -1.4901161193847656e-08, 0.12940946221351624 * size),
+                     (-0.4330127537250519 * size, -1.4901161193847656e-08, 0.24999992549419403 * size),
+                     (-0.3535534739494324 * size, -2.9802322387695312e-08, 0.35355329513549805 * size),
+                     (-0.25000011920928955 * size, -2.9802322387695312e-08, 0.43301263451576233 * size),
+                     (-0.12940968573093414 * size, -2.9802322387695312e-08, 0.48296287655830383 * size),
+                     (-0.12940968573093414 * size, -2.9802322387695312e-08, 0.5829628705978394 * size),
+                     (0.1294093132019043 * size, -2.9802322387695312e-08, 0.482962965965271 * size),
+                     (0.2499997913837433 * size, -2.9802322387695312e-08, 0.43301281332969666 * size),
+                     (0.3535532057285309 * size, -2.9802322387695312e-08, 0.3535535931587219 * size),
+                     (0.43301260471343994 * size, -2.9802322387695312e-08, 0.25000014901161194 * size),
+                     (0.48296284675598145 * size, -1.4901161193847656e-08, 0.12940971553325653 * size),
+                     (0.1294093132019043 * size, -2.9802322387695312e-08, 0.5829629898071289 * size),
+                     (0.482962965965271 * size, 1.4901161193847656e-08, -0.12940926849842072 * size),
+                     (0.43301284313201904 * size, 1.4901161193847656e-08, -0.2499997466802597 * size),
+                     (0.3535536229610443 * size, 2.9802322387695312e-08, -0.3535531759262085 * size),
+                     (0.2500002980232239 * size, 2.9802322387695312e-08, -0.43301254510879517 * size),
+                     (0.12940987944602966 * size, 2.9802322387695312e-08, -0.48296281695365906 * size),
+                     (-0.1941145956516266 * size, -2.9802322387695312e-08, 0.5829629898071289 * size),
+                     (-2.102837726170037e-07 * size, -3.218650945768786e-08, 0.7560000419616699 * size),
+                     (0.19411394000053406 * size, -2.9802322387695312e-08, 0.5829629898071289 * size),
+                     (0.5829628705978394 * size, -1.4901161193847656e-08, 0.1941145360469818 * size),
+                     (0.7560000419616699 * size, -1.5347723702281886e-14, 2.5105265422098455e-07 * size),
+                     (0.5829629898071289 * size, 1.4901161193847656e-08, -0.19411394000053406 * size),
+                     (-0.5829628705978394 * size, 1.4901161193847656e-08, -0.19411435723304749 * size),
+                     (-0.7560000419616699 * size, 3.8369309255704715e-15, -4.076887094583981e-08 * size),
+                     (-0.5829629302024841 * size, -1.4901161193847656e-08, 0.19411414861679077 * size),
+                     (0.0 * size, 3.218650945768786e-08, -0.7560000419616699 * size),
+                     (-0.1941143274307251 * size, 2.9802322387695312e-08, -0.5829628109931946 * size),
+                     (0.1941147744655609 * size, 2.9802322387695312e-08, -0.5829628109931946 * size),
+                     (-0.5829629302024841 * size, -1.4901161193847656e-08, 0.12940946221351624 * size),
+                     (-0.5829628705978394 * size, 1.4901161193847656e-08, -0.1294095367193222 * size),
+                     (0.12940987944602966 * size, 2.9802322387695312e-08, -0.5829628109931946 * size),
+                     (-0.129409521818161 * size, 2.9802322387695312e-08, -0.5829628705978394 * size), ]
+            edges = [(2, 1), (3, 2), (4, 3), (5, 4), (8, 7), (9, 8), (10, 9), (11, 10), (39, 34), (14, 13), (15, 14),
+                     (16, 15), (17, 16), (38, 23), (37, 5), (20, 19), (21, 20), (22, 21), (23, 22), (36, 32), (25, 24),
+                     (26, 25), (0, 17), (18, 13), (12, 24), (28, 27), (29, 28), (6, 29), (6, 19), (0, 27), (31, 30),
+                     (32, 31), (12, 11), (36, 7), (37, 30), (34, 33), (33, 35), (38, 35), (18, 26), (39, 1), ]
+            faces = []
+            rot_mat = Matrix.Rotation(math.radians(rot), 4, 'X')
+            trans_mat = Matrix.Translation(Vector((0.0, pos, 0.0)))
+            mat = trans_mat @ rot_mat
+
+            mesh = obj.data
+            mesh.from_pydata(verts, edges, faces)
+            mesh.transform(mat)
+            mesh.update()
+            mesh.update()
+            return obj
+        else:
+            return None
+
+    @staticmethod
+    def create_fourgaps_widget(rig, bone_name, size=1.0, pos=1.0, rot=0.0, bone_transform_name=None):
+        obj = create_widget(rig, bone_name, bone_transform_name)
+        if obj != None:
+            verts = [(-0.1941143274307251 * size, 2.9802322387695312e-08, -0.5829628109931946 * size),
+                     (-0.30721572041511536 * size, 3.6622967769517345e-08, -0.532113254070282 * size),
+                     (-0.4344686269760132 * size, 3.6622967769517345e-08, -0.4344686269760132 * size),
+                     (-0.532113254070282 * size, 1.8311483884758673e-08, -0.30721569061279297 * size),
+                     (-0.5829628705978394 * size, 1.4901161193847656e-08, -0.19411435723304749 * size),
+                     (-0.5829629302024841 * size, -1.4901161193847656e-08, 0.19411414861679077 * size),
+                     (-0.5321133136749268 * size, -1.8311483884758673e-08, 0.3072156310081482 * size),
+                     (-0.43446874618530273 * size, -3.6622967769517345e-08, 0.43446850776672363 * size),
+                     (-0.3072158396244049 * size, -3.6622967769517345e-08, 0.5321131348609924 * size),
+                     (-0.1941145956516266 * size, -2.9802322387695312e-08, 0.5829629898071289 * size),
+                     (0.19411394000053406 * size, -2.9802322387695312e-08, 0.5829629898071289 * size),
+                     (0.30721548199653625 * size, -3.6622967769517345e-08, 0.5321133732795715 * size),
+                     (0.4344683885574341 * size, -3.6622967769517345e-08, 0.4344688653945923 * size),
+                     (0.5321131348609924 * size, -3.6622967769517345e-08, 0.3072158992290497 * size),
+                     (0.5829628705978394 * size, -1.4901161193847656e-08, 0.1941145360469818 * size),
+                     (0.5829629898071289 * size, 1.4901161193847656e-08, -0.19411394000053406 * size),
+                     (0.5321133732795715 * size, 1.8311483884758673e-08, -0.3072154223918915 * size),
+                     (0.43446895480155945 * size, 3.6622967769517345e-08, -0.4344683885574341 * size),
+                     (0.307216078042984 * size, 3.6622967769517345e-08, -0.5321130156517029 * size),
+                     (0.1941147744655609 * size, 2.9802322387695312e-08, -0.5829628109931946 * size), ]
+            edges = [(1, 0), (2, 1), (3, 2), (4, 3), (6, 5), (7, 6), (8, 7), (9, 8), (11, 10), (12, 11), (13, 12),
+                     (14, 13), (16, 15), (17, 16), (18, 17), (19, 18), ]
+            faces = []
+            rot_mat = Matrix.Rotation(math.radians(rot), 4, 'X')
+            trans_mat = Matrix.Translation(Vector((0.0, pos, 0.0)))
+            mat = trans_mat @ rot_mat
+
+            mesh = obj.data
+            mesh.from_pydata(verts, edges, faces)
+            mesh.transform(mat)
+            mesh.update()
+            mesh.update()
+            return obj
+        else:
+            return None
+
+    # ------------ End of long, boring widget creation functions -----------
+
+    def execute(self, context):
+        rig = context.active_object
+        bone = context.active_pose_bone
+
+        widget_sources = [obj for obj in context.selected_objects
+                          if obj.type == 'MESH']
+
+        func = getattr(self, "create_%s_widget" % self.widget_shape, None)
+        if func is None and len(widget_sources) == 1:
+            widget = self.create_widget_from_object(rig, bone, widget_sources[0])
+        else:
+            widget = func(rig, bone.name, self.widget_size, self.widget_pos, self.widget_rot)
+
+        for bone in context.selected_pose_bones:
+            bone.custom_shape = widget
+
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        return self.execute(context)
 
 
 class ADH_BindToLattice(bpy.types.Operator):
@@ -818,6 +1224,7 @@ def register():
     bpy.utils.register_class(ADH_RenameRegex)
     bpy.utils.register_class(ADH_UseSameCustomShape)
     bpy.utils.register_class(ADH_SelectCustomShape)
+    bpy.utils.register_class(ADH_CreateCustomShape)
     bpy.utils.register_class(ADH_BindToLattice)
     bpy.utils.register_class(ADH_ApplyLattices)
     bpy.utils.register_class(ADH_MaskSelectedVertices)
@@ -834,6 +1241,7 @@ def unregister():
     bpy.utils.unregister_class(ADH_RenameRegex)
     bpy.utils.unregister_class(ADH_UseSameCustomShape)
     bpy.utils.unregister_class(ADH_SelectCustomShape)
+    bpy.utils.unregister_class(ADH_CreateCustomShape)
     bpy.utils.unregister_class(ADH_BindToLattice)
     bpy.utils.unregister_class(ADH_ApplyLattices)
     bpy.utils.unregister_class(ADH_MaskSelectedVertices)
