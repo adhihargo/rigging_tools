@@ -8,7 +8,7 @@ bl_info = {
     "name": "ADH Rigging Tools",
     "author": "Adhi Hargo",
     "version": (1, 0, 0),
-    "blender": (2, 8, 0),
+    "blender": (2, 80, 0),
     "location": "View3D > Tools > ADH Rigging Tools",
     "description": "Several simple tools to aid rigging.",
     "warning": "",
@@ -28,11 +28,11 @@ class ADH_RenameRegex(bpy.types.Operator):
     bl_label = 'Rename Regex'
     bl_options = {'REGISTER', 'UNDO'}
 
-    regex_search_pattern = bpy.props.StringProperty(
+    regex_search_pattern: bpy.props.StringProperty(
         name="Search String",
         default="",
     )
-    regex_replacement_string = bpy.props.StringProperty(
+    regex_replacement_string: bpy.props.StringProperty(
         name="Replacement String",
         default="",
     )
@@ -136,7 +136,7 @@ class ADH_BindToLattice(bpy.types.Operator):
     bl_label = 'Bind Lattice to Objects'
     bl_options = {'REGISTER', 'UNDO'}
 
-    create_vertex_group = bpy.props.BoolProperty(
+    create_vertex_group: bpy.props.BoolProperty(
         name="Create Vertex Group",
         description="Create limiting vertex group using the lattice object's name.",
         default=False
@@ -249,7 +249,7 @@ class ADH_MaskSelectedVertices(bpy.types.Operator, ADH_AbstractMaskOperator):
     bl_label = 'Mask Selected Vertices'
     bl_options = {'REGISTER'}
 
-    action = bpy.props.EnumProperty(
+    action: bpy.props.EnumProperty(
         name='Action',
         items=[('add', 'Add', 'Add selected vertices to mask.'),
                ('remove', 'Remove', 'Remove selected vertices from mask.'),
@@ -301,7 +301,7 @@ class ADH_CreateHooks(bpy.types.Operator):
     bl_label = 'Create Hooks'
     bl_options = {'REGISTER', 'UNDO'}
 
-    hook_layers = bpy.props.BoolVectorProperty(
+    hook_layers: bpy.props.BoolVectorProperty(
         name="Hook Layers",
         description="Armature layers where new hooks will be placed",
         subtype='LAYER',
@@ -438,19 +438,19 @@ class ADH_CreateSpokes(bpy.types.Operator):
     bl_label = 'Create Spokes'
     bl_options = {'REGISTER', 'UNDO'}
 
-    parent = bpy.props.BoolProperty(
+    parent: bpy.props.BoolProperty(
         name="Parent",
         description="Create parent bone, one for each if armature selected.",
         default=False
     )
 
-    tip = bpy.props.BoolProperty(
+    tip: bpy.props.BoolProperty(
         name="Tracked Tip",
         description="Create tip bone and insert Damped Track constraint with the tip as target.",
         default=False
     )
 
-    spoke_layers = bpy.props.BoolVectorProperty(
+    spoke_layers: bpy.props.BoolVectorProperty(
         name="Spoke Layers",
         description="Armature layers where spoke bones will be placed",
         subtype='LAYER',
@@ -458,7 +458,7 @@ class ADH_CreateSpokes(bpy.types.Operator):
         default=[x == 29 for x in range(0, 32)]
     )
 
-    aux_layers = bpy.props.BoolVectorProperty(
+    aux_layers: bpy.props.BoolVectorProperty(
         name="Parent and Tip Layers",
         description="Armature layers where spoke tip and parent bones" + \
                     " will be placed",
@@ -467,7 +467,7 @@ class ADH_CreateSpokes(bpy.types.Operator):
         default=[x == 30 for x in range(0, 32)]
     )
 
-    basename = bpy.props.StringProperty(
+    basename: bpy.props.StringProperty(
         name="Bone Name",
         default="spoke",
     )
@@ -673,13 +673,13 @@ class ADH_BindToBone(bpy.types.Operator):
     bl_label = 'Bind Object to Bone'
     bl_options = {'REGISTER', 'UNDO'}
 
-    only_selected = bpy.props.BoolProperty(
+    only_selected: bpy.props.BoolProperty(
         name="Only Selected",
         description="Bind only selected vertices.",
         default=False,
         options={'SKIP_SAVE'})
 
-    set_as_parent = bpy.props.BoolProperty(
+    set_as_parent: bpy.props.BoolProperty(
         name="Set as Parent",
         description="Also parent object to armature.",
         default=True,
