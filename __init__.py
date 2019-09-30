@@ -1220,38 +1220,34 @@ class ADH_MapShapeKeysToBones(bpy.types.Operator):
         return {"FINISHED"}
 
 
+module_classes = (
+    ADH_RenameRegex,
+    ADH_UseSameCustomShape,
+    ADH_SelectCustomShape,
+    ADH_CreateCustomShape,
+    ADH_BindToLattice,
+    ADH_ApplyLattices,
+    ADH_MaskSelectedVertices,
+    ADH_DeleteMask,
+    ADH_CreateHooks,
+    ADH_CreateSpokes,
+    ADH_RemoveVertexGroupsUnselectedBones,
+    ADH_BindToBone,
+    ADH_SyncCustomShapePositionToBone,
+    ADH_MapShapeKeysToBones,
+)
+
+
 def register():
-    bpy.utils.register_class(ADH_RenameRegex)
-    bpy.utils.register_class(ADH_UseSameCustomShape)
-    bpy.utils.register_class(ADH_SelectCustomShape)
-    bpy.utils.register_class(ADH_CreateCustomShape)
-    bpy.utils.register_class(ADH_BindToLattice)
-    bpy.utils.register_class(ADH_ApplyLattices)
-    bpy.utils.register_class(ADH_MaskSelectedVertices)
-    bpy.utils.register_class(ADH_DeleteMask)
-    bpy.utils.register_class(ADH_CreateHooks)
-    bpy.utils.register_class(ADH_CreateSpokes)
-    bpy.utils.register_class(ADH_RemoveVertexGroupsUnselectedBones)
-    bpy.utils.register_class(ADH_BindToBone)
-    bpy.utils.register_class(ADH_SyncCustomShapePositionToBone)
-    bpy.utils.register_class(ADH_MapShapeKeysToBones)
+    from bpy.utils import register_class
+    for cls in module_classes:
+        register_class(cls)
 
 
 def unregister():
-    bpy.utils.unregister_class(ADH_RenameRegex)
-    bpy.utils.unregister_class(ADH_UseSameCustomShape)
-    bpy.utils.unregister_class(ADH_SelectCustomShape)
-    bpy.utils.unregister_class(ADH_CreateCustomShape)
-    bpy.utils.unregister_class(ADH_BindToLattice)
-    bpy.utils.unregister_class(ADH_ApplyLattices)
-    bpy.utils.unregister_class(ADH_MaskSelectedVertices)
-    bpy.utils.unregister_class(ADH_DeleteMask)
-    bpy.utils.unregister_class(ADH_CreateHooks)
-    bpy.utils.unregister_class(ADH_CreateSpokes)
-    bpy.utils.unregister_class(ADH_RemoveVertexGroupsUnselectedBones)
-    bpy.utils.unregister_class(ADH_BindToBone)
-    bpy.utils.unregister_class(ADH_SyncCustomShapePositionToBone)
-    bpy.utils.unregister_class(ADH_MapShapeKeysToBones)
+    from bpy.utils import unregister_class
+    for cls in module_classes:
+        unregister_class(cls)
 
 
 if __name__ == "__main__":
